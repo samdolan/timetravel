@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-sqlite3"
 
@@ -47,11 +48,30 @@ func initSchema(db *sql.DB) error {
 			record_id     INTEGER NOT NULL,
 			version       INTEGER NOT NULL,
 			data_json     TEXT NOT NULL,
-			created_at_ms INTEGER NOT NULL DEFAULT (unixepoch('now') * 1000),
+			created_at_ms INTEGER NOT NULL DEFAULT (
+				(CAST(strftime('%s','now') AS INTEGER) * 1000) +
+				CAST((strftime('%f','now') - strftime('%S','now')) * 1000 AS INTEGER)
+			),
 			PRIMARY KEY (record_id, version)
 		)
 	`); err != nil {
 		return err
+	}
+
+	createdAtMSColumnExists, err := hasColumn(db, "record_versions", "created_at_ms")
+	if err != nil {
+		return err
+	}
+	if !createdAtMSColumnExists {
+		if _, err := db.Exec(`
+			ALTER TABLE record_versions
+			ADD COLUMN created_at_ms INTEGER NOT NULL DEFAULT (
+				(CAST(strftime('%s','now') AS INTEGER) * 1000) +
+				CAST((strftime('%f','now') - strftime('%S','now')) * 1000 AS INTEGER)
+			)
+		`); err != nil {
+			return err
+		}
 	}
 
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_record_versions_created_at_ms ON record_versions (created_at_ms)`); err != nil {
@@ -131,6 +151,44 @@ func (s *DBRecordService) GetLatestRecordVersion(ctx context.Context, id int) (e
 		ctx,
 		`SELECT version, data_json, created_at_ms FROM record_versions WHERE record_id = ? ORDER BY version DESC LIMIT 1`,
 		id,
+	).Scan(&version, &dataJSON, &createdAtMS)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return entity.RecordVersion{}, ErrRecordDoesNotExist
+		}
+		return entity.RecordVersion{}, err
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+		return entity.RecordVersion{}, err
+	}
+	if data == nil {
+		data = map[string]string{}
+	}
+
+	return entity.RecordVersion{ID: id, Version: version, CreatedAtMS: createdAtMS, Data: data}, nil
+}
+
+func (s *DBRecordService) GetRecordVersionAt(ctx context.Context, id int, atMS int64) (entity.RecordVersion, error) {
+	if id <= 0 {
+		return entity.RecordVersion{}, ErrRecordIDInvalid
+	}
+
+	var (
+		version     int
+		dataJSON    string
+		createdAtMS int64
+	)
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT version, data_json, created_at_ms
+		 FROM record_versions
+		 WHERE record_id = ? AND created_at_ms <= ?
+		 ORDER BY created_at_ms DESC, version DESC
+		 LIMIT 1`,
+		id,
+		atMS,
 	).Scan(&version, &dataJSON, &createdAtMS)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -241,8 +299,9 @@ func (s *DBRecordService) CreateRecord(ctx context.Context, record entity.Record
 
 	_, err = s.db.ExecContext(
 		ctx,
-		`INSERT INTO record_versions (record_id, version, data_json) VALUES (?, 1, ?)`,
+		`INSERT INTO record_versions (record_id, version, created_at_ms, data_json) VALUES (?, 1, ?, ?)`,
 		record.ID,
+		time.Now().UTC().UnixMilli(),
 		string(dataJSONBytes),
 	)
 	if err != nil {
@@ -267,12 +326,13 @@ func (s *DBRecordService) UpdateRecord(ctx context.Context, id int, updates map[
 	defer func() { _ = tx.Rollback() }()
 
 	var currentVersion int
+	var currentCreatedAtMS int64
 	var dataJSON string
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT version, data_json FROM record_versions WHERE record_id = ? ORDER BY version DESC LIMIT 1`,
+		`SELECT version, created_at_ms, data_json FROM record_versions WHERE record_id = ? ORDER BY version DESC LIMIT 1`,
 		id,
-	).Scan(&currentVersion, &dataJSON)
+	).Scan(&currentVersion, &currentCreatedAtMS, &dataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return entity.Record{}, ErrRecordDoesNotExist
@@ -300,11 +360,17 @@ func (s *DBRecordService) UpdateRecord(ctx context.Context, id int, updates map[
 		return entity.Record{}, err
 	}
 
+	newCreatedAtMS := time.Now().UTC().UnixMilli()
+	if newCreatedAtMS <= currentCreatedAtMS {
+		newCreatedAtMS = currentCreatedAtMS + 1
+	}
+
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO record_versions (record_id, version, data_json) VALUES (?, ?, ?)`,
+		`INSERT INTO record_versions (record_id, version, created_at_ms, data_json) VALUES (?, ?, ?, ?)`,
 		id,
 		currentVersion+1,
+		newCreatedAtMS,
 		string(newDataJSONBytes),
 	); err != nil {
 		return entity.Record{}, err

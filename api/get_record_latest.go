@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/rainbowmga/timetravel/entity"
 	"github.com/rainbowmga/timetravel/service"
 )
 
@@ -21,7 +23,19 @@ func (a *V2API) GetRecordLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recordVersion, err := a.records.GetLatestRecordVersion(ctx, int(idNumber))
+	at := r.URL.Query().Get("at")
+	var recordVersion entity.RecordVersion
+	if at == "" {
+		recordVersion, err = a.records.GetLatestRecordVersion(ctx, int(idNumber))
+	} else {
+		atTime, parseErr := time.Parse(time.RFC3339Nano, at)
+		if parseErr != nil {
+			err := writeError(w, "invalid at; must be an RFC3339 timestamp", http.StatusBadRequest)
+			logError(err)
+			return
+		}
+		recordVersion, err = a.records.GetRecordVersionAt(ctx, int(idNumber), atTime.UTC().UnixMilli())
+	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		message := ErrInternal.Error()

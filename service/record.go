@@ -34,6 +34,7 @@ type RecordService interface {
 type VersionedRecordService interface {
 	RecordService
 	GetLatestRecordVersion(ctx context.Context, id int) (entity.RecordVersion, error)
+	GetRecordVersionAt(ctx context.Context, id int, atMS int64) (entity.RecordVersion, error)
 	GetRecordVersion(ctx context.Context, id int, version int) (entity.RecordVersion, error)
 	ListRecordVersions(ctx context.Context, id int) (entity.RecordVersions, error)
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/rainbowmga/timetravel/api"
@@ -109,6 +111,11 @@ func TestV2_Records_GetSpecificVersion(t *testing.T) {
 	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world"}`)
 	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world 2","status":"ok"}`)
 
+	at := doRequest(router, http.MethodGet, "/api/v2/records/1?at=1970-01-01T00:00:00Z", "")
+	if at.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", at.Code, at.Body.String())
+	}
+
 	versions := doRequest(router, http.MethodGet, "/api/v2/records/1/versions", "")
 	if versions.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", versions.Code, versions.Body.String())
@@ -140,6 +147,20 @@ func TestV2_Records_GetSpecificVersion(t *testing.T) {
 	}
 	if latestRecord.ID != 1 || latestRecord.Version != 2 || latestRecord.Data["hello"] != "world 2" {
 		t.Fatalf("unexpected record: %+v", latestRecord)
+	}
+
+	// Use the created_at_ms from version 1 to time-travel back to it.
+	v1At := time.UnixMilli(list.Versions[0].CreatedAtMS).UTC().Format(time.RFC3339Nano)
+	at = doRequest(router, http.MethodGet, "/api/v2/records/1?at="+url.QueryEscape(v1At), "")
+	if at.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", at.Code, at.Body.String())
+	}
+	var atRecord entity.RecordVersion
+	if err := json.Unmarshal(at.Body.Bytes(), &atRecord); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if atRecord.ID != 1 || atRecord.Version != 1 || atRecord.Data["hello"] != "world" {
+		t.Fatalf("unexpected record: %+v", atRecord)
 	}
 
 	rr := doRequest(router, http.MethodGet, "/api/v2/records/1/versions/1", "")

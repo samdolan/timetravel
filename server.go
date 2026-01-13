@@ -21,8 +21,13 @@ func logError(err error) {
 func main() {
 	router := mux.NewRouter()
 
-	service := service.NewInMemoryRecordService()
-	api := api.NewAPI(&service)
+	recordService, err := service.NewDBRecordService("timetravel.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { logError(recordService.Close()) }()
+
+	api := api.NewAPI(recordService)
 
 	apiRoute := router.PathPrefix("/api/v1").Subrouter()
 	apiRoute.Path("/health").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

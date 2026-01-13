@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestV1_Health(t *testing.T) {
-	router := newV1Router()
+	router := newV1Router(t)
 
 	rr := doRequest(router, http.MethodPost, "/api/v1/health", "")
 	if rr.Code != http.StatusOK {
@@ -31,7 +32,7 @@ func TestV1_Health(t *testing.T) {
 }
 
 func TestV1_Records_Lifecycle(t *testing.T) {
-	router := newV1Router()
+	router := newV1Router(t)
 
 	// Create.
 	rr := doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world"}`)
@@ -79,7 +80,7 @@ func TestV1_Records_Lifecycle(t *testing.T) {
 }
 
 func TestV1_Records_InvalidID(t *testing.T) {
-	router := newV1Router()
+	router := newV1Router(t)
 	rr := doRequest(router, http.MethodGet, "/api/v1/records/0", "")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
@@ -87,7 +88,7 @@ func TestV1_Records_InvalidID(t *testing.T) {
 }
 
 func TestV1_Records_MissingRecord(t *testing.T) {
-	router := newV1Router()
+	router := newV1Router(t)
 	rr := doRequest(router, http.MethodGet, "/api/v1/records/32", "")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
@@ -95,7 +96,7 @@ func TestV1_Records_MissingRecord(t *testing.T) {
 }
 
 func TestV1_Records_InvalidJSON(t *testing.T) {
-	router := newV1Router()
+	router := newV1Router(t)
 	rr := doRequest(router, http.MethodPost, "/api/v1/records/1", "{")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
@@ -115,10 +116,18 @@ func doRequest(router http.Handler, method, path, body string) *httptest.Respons
 	return rr
 }
 
-func newV1Router() *mux.Router {
+func newV1Router(t *testing.T) *mux.Router {
+	t.Helper()
+
 	router := mux.NewRouter()
-	recordService := service.NewInMemoryRecordService()
-	a := api.NewAPI(&recordService)
+	dbPath := filepath.Join(t.TempDir(), "timetravel.db")
+	recordService, err := service.NewDBRecordService(dbPath)
+	if err != nil {
+		t.Fatalf("NewDBRecordService: %v", err)
+	}
+	t.Cleanup(func() { _ = recordService.Close() })
+
+	a := api.NewAPI(recordService)
 
 	apiRoute := router.PathPrefix("/api/v1").Subrouter()
 	apiRoute.Path("/health").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

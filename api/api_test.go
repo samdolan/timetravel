@@ -103,6 +103,48 @@ func TestV1_Records_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestV2_Records_GetSpecificVersion(t *testing.T) {
+	router := newV1V2Router(t)
+
+	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world"}`)
+	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world 2","status":"ok"}`)
+
+	latest := doRequest(router, http.MethodGet, "/api/v2/records/1", "")
+	if latest.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", latest.Code, latest.Body.String())
+	}
+	var latestRecord entity.RecordVersion
+	if err := json.Unmarshal(latest.Body.Bytes(), &latestRecord); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if latestRecord.ID != 1 || latestRecord.Version != 2 || latestRecord.Data["hello"] != "world 2" {
+		t.Fatalf("unexpected record: %+v", latestRecord)
+	}
+
+	rr := doRequest(router, http.MethodGet, "/api/v2/records/1/versions/1", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var record entity.RecordVersion
+	if err := json.Unmarshal(rr.Body.Bytes(), &record); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if record.ID != 1 || record.Version != 1 || record.Data["hello"] != "world" {
+		t.Fatalf("unexpected record: %+v", record)
+	}
+
+	rr = doRequest(router, http.MethodGet, "/api/v2/records/1/versions/2", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &record); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if record.ID != 1 || record.Version != 2 || record.Data["hello"] != "world 2" || record.Data["status"] != "ok" {
+		t.Fatalf("unexpected record: %+v", record)
+	}
+}
+
 func doRequest(router http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
 	var req *http.Request
@@ -117,6 +159,14 @@ func doRequest(router http.Handler, method, path, body string) *httptest.Respons
 }
 
 func newV1Router(t *testing.T) *mux.Router {
+	return newTestRouter(t, false)
+}
+
+func newV1V2Router(t *testing.T) *mux.Router {
+	return newTestRouter(t, true)
+}
+
+func newTestRouter(t *testing.T, includeV2 bool) *mux.Router {
 	t.Helper()
 
 	router := mux.NewRouter()
@@ -134,5 +184,12 @@ func newV1Router(t *testing.T) *mux.Router {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 	a.CreateRoutes(apiRoute)
+
+	if includeV2 {
+		v2 := api.NewV2API(recordService)
+		v2Route := router.PathPrefix("/api/v2").Subrouter()
+		v2.CreateRoutes(v2Route)
+	}
+
 	return router
 }

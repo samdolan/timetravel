@@ -27,14 +27,18 @@ func main() {
 	}
 	defer func() { logError(recordService.Close()) }()
 
-	api := api.NewAPI(recordService)
+	v1API := api.NewAPI(recordService)
+	v2API := api.NewV2API(recordService)
 
 	apiRoute := router.PathPrefix("/api/v1").Subrouter()
 	apiRoute.Path("/health").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		err := json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		logError(err)
 	})
-	api.CreateRoutes(apiRoute)
+	v1API.CreateRoutes(apiRoute)
+
+	v2Route := router.PathPrefix("/api/v2").Subrouter()
+	v2API.CreateRoutes(v2Route)
 
 	address := "127.0.0.1:8000"
 	srv := &http.Server{

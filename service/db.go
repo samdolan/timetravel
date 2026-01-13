@@ -117,6 +117,73 @@ func (s *DBRecordService) GetRecord(ctx context.Context, id int) (entity.Record,
 	return entity.Record{ID: id, Data: data}, nil
 }
 
+func (s *DBRecordService) GetLatestRecordVersion(ctx context.Context, id int) (entity.RecordVersion, error) {
+	if id <= 0 {
+		return entity.RecordVersion{}, ErrRecordIDInvalid
+	}
+
+	var (
+		version     int
+		dataJSON    string
+		createdAtMS int64
+	)
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT version, data_json, created_at_ms FROM record_versions WHERE record_id = ? ORDER BY version DESC LIMIT 1`,
+		id,
+	).Scan(&version, &dataJSON, &createdAtMS)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return entity.RecordVersion{}, ErrRecordDoesNotExist
+		}
+		return entity.RecordVersion{}, err
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+		return entity.RecordVersion{}, err
+	}
+	if data == nil {
+		data = map[string]string{}
+	}
+
+	return entity.RecordVersion{ID: id, Version: version, CreatedAtMS: createdAtMS, Data: data}, nil
+}
+
+func (s *DBRecordService) GetRecordVersion(ctx context.Context, id int, version int) (entity.RecordVersion, error) {
+	if id <= 0 {
+		return entity.RecordVersion{}, ErrRecordIDInvalid
+	}
+	if version <= 0 {
+		return entity.RecordVersion{}, ErrRecordIDInvalid
+	}
+
+	var dataJSON string
+	var createdAtMS int64
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT data_json, created_at_ms FROM record_versions WHERE record_id = ? AND version = ? LIMIT 1`,
+		id,
+		version,
+	).Scan(&dataJSON, &createdAtMS)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return entity.RecordVersion{}, ErrRecordVersionDoesNotExist
+		}
+		return entity.RecordVersion{}, err
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+		return entity.RecordVersion{}, err
+	}
+	if data == nil {
+		data = map[string]string{}
+	}
+
+	return entity.RecordVersion{ID: id, Version: version, CreatedAtMS: createdAtMS, Data: data}, nil
+}
+
 func (s *DBRecordService) CreateRecord(ctx context.Context, record entity.Record) error {
 	if record.ID <= 0 {
 		return ErrRecordIDInvalid

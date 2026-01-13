@@ -10,6 +10,7 @@ import (
 var ErrRecordDoesNotExist = errors.New("record with that id does not exist")
 var ErrRecordIDInvalid = errors.New("record id must >= 0")
 var ErrRecordAlreadyExists = errors.New("record already exists")
+var ErrRecordVersionDoesNotExist = errors.New("record version does not exist")
 
 // Implements method to get, create, and update record data.
 type RecordService interface {
@@ -27,4 +28,11 @@ type RecordService interface {
 	//
 	// UpdateRecord will error if id <= 0 or the record does not exist with that id.
 	UpdateRecord(ctx context.Context, id int, updates map[string]*string) (entity.Record, error)
+}
+
+// VersionedRecordService adds access to historical versions of a record.
+type VersionedRecordService interface {
+	RecordService
+	GetLatestRecordVersion(ctx context.Context, id int) (entity.RecordVersion, error)
+	GetRecordVersion(ctx context.Context, id int, version int) (entity.RecordVersion, error)
 }

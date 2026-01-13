@@ -15,5 +15,6 @@ func NewV2API(records service.VersionedRecordService) *V2API {
 
 func (a *V2API) CreateRoutes(routes *mux.Router) {
 	routes.Path("/records/{id}").HandlerFunc(a.GetRecordLatest).Methods("GET")
+	routes.Path("/records/{id}/versions").HandlerFunc(a.ListRecordVersions).Methods("GET")
 	routes.Path("/records/{id}/versions/{version}").HandlerFunc(a.GetRecordVersion).Methods("GET")
 }

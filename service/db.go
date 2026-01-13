@@ -184,6 +184,47 @@ func (s *DBRecordService) GetRecordVersion(ctx context.Context, id int, version 
 	return entity.RecordVersion{ID: id, Version: version, CreatedAtMS: createdAtMS, Data: data}, nil
 }
 
+func (s *DBRecordService) ListRecordVersions(ctx context.Context, id int) (entity.RecordVersions, error) {
+	if id <= 0 {
+		return entity.RecordVersions{}, ErrRecordIDInvalid
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT version, created_at_ms, data_json FROM record_versions WHERE record_id = ? ORDER BY version ASC`,
+		id,
+	)
+	if err != nil {
+		return entity.RecordVersions{}, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := entity.RecordVersions{ID: id, Versions: []entity.RecordVersionInfo{}}
+	for rows.Next() {
+		var info entity.RecordVersionInfo
+		var dataJSON string
+		if err := rows.Scan(&info.Version, &info.CreatedAtMS, &dataJSON); err != nil {
+			return entity.RecordVersions{}, err
+		}
+		if err := json.Unmarshal([]byte(dataJSON), &info.Data); err != nil {
+			return entity.RecordVersions{}, err
+		}
+		if info.Data == nil {
+			info.Data = map[string]string{}
+		}
+		result.Versions = append(result.Versions, info)
+	}
+	if err := rows.Err(); err != nil {
+		return entity.RecordVersions{}, err
+	}
+
+	if len(result.Versions) == 0 {
+		return entity.RecordVersions{}, ErrRecordDoesNotExist
+	}
+
+	return result, nil
+}
+
 func (s *DBRecordService) CreateRecord(ctx context.Context, record entity.Record) error {
 	if record.ID <= 0 {
 		return ErrRecordIDInvalid

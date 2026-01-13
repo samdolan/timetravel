@@ -109,6 +109,27 @@ func TestV2_Records_GetSpecificVersion(t *testing.T) {
 	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world"}`)
 	_ = doRequest(router, http.MethodPost, "/api/v1/records/1", `{"hello":"world 2","status":"ok"}`)
 
+	versions := doRequest(router, http.MethodGet, "/api/v2/records/1/versions", "")
+	if versions.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", versions.Code, versions.Body.String())
+	}
+	var list entity.RecordVersions
+	if err := json.Unmarshal(versions.Body.Bytes(), &list); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if list.ID != 1 || len(list.Versions) != 2 || list.Versions[0].Version != 1 || list.Versions[1].Version != 2 {
+		t.Fatalf("unexpected versions: %+v", list)
+	}
+	if list.Versions[0].CreatedAtMS == 0 || list.Versions[1].CreatedAtMS == 0 {
+		t.Fatalf("expected created_at_ms to be set: %+v", list)
+	}
+	if list.Versions[0].Data["hello"] != "world" {
+		t.Fatalf("unexpected v1 data: %+v", list.Versions[0])
+	}
+	if list.Versions[1].Data["hello"] != "world 2" || list.Versions[1].Data["status"] != "ok" {
+		t.Fatalf("unexpected v2 data: %+v", list.Versions[1])
+	}
+
 	latest := doRequest(router, http.MethodGet, "/api/v2/records/1", "")
 	if latest.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", latest.Code, latest.Body.String())
